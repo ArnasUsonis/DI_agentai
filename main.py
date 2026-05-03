@@ -7,17 +7,17 @@ import json
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_groq import ChatGroq
 import os
-from dotenv import load_dotenv
+#from dotenv import load_dotenv
 
-load_dotenv()
+# load_dotenv()
 
-#model = ChatOllama(model="llama3.2", temperature=0.1).bind(tool_choice="required")
+model = ChatOllama(model="llama3.2", temperature=0.1).bind(tool_choice="required")
 
-model = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=os.getenv("GROQ_API_KEY"),
-    temperature=0.1
-).bind(tool_choice="required")
+# model = ChatGroq(
+#     model="llama-3.3-70b-versatile",
+#     api_key=os.getenv("GROQ_API_KEY"),
+#     temperature=0.1
+# ).bind(tool_choice="required")
 
 delfi_linkai = {
     "sportas":   "https://feed.delfi.lt/v2/channel/f59aa234-4a2b-11ed-94c9-0242c0a88103?format=rss",
