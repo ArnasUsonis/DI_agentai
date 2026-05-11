@@ -24,8 +24,6 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import trim_messages
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
@@ -54,7 +52,6 @@ class RungtyniuSarasas(BaseModel):
 
 
 LLM_NAME = "qwen2.5" # modelio pavadinimas kuri naudosime
-
 model = ChatOllama(model=LLM_NAME, temperature=0).bind(tool_choice="required")
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2") # semantines paieskos modelis
 sys.stderr = stderr
@@ -189,6 +186,9 @@ def ideti_i_kalendoriu(rungtynes_json: str) -> str:
     Args:
         rungtynes_json: JSON string with match information from isskirk_rungtynes results.
     """
+    if isinstance(rungtynes_json, dict): #paduoda dict o ne json bandom taip
+        rungtynes_json = json.dumps(rungtynes_json, ensure_ascii=False)
+
     try:
         service = leidimas_naudotis_kaledoriumi()
         rungtynes = json.loads(rungtynes_json)["rungtynes"]
@@ -219,13 +219,18 @@ def ideti_i_kalendoriu(rungtynes_json: str) -> str:
 
 
 siandiena = date.today().isoformat()
+leidimas_naudotis_kaledoriumi()
+santrauka = ""
+llm_santraukai = ChatOllama(model=LLM_NAME, temperature=0) #atminčiai
 
-memory = MemorySaver()
-agent = create_react_agent(
-    model=model,
-    tools=[gauk_straipsniu_sarasa, gauk_straipsnio_teksta, isskirk_rungtynes, ideti_i_kalendoriu],
-    prompt=f"""
+def klausk(uzklausa: str, santrauka: str) -> tuple[str, str]:
+    agent = create_react_agent(
+        model=model,
+        tools=[gauk_straipsniu_sarasa, gauk_straipsnio_teksta, isskirk_rungtynes, ideti_i_kalendoriu],
+        prompt=f"""
 You are a Lithuanian sports news assistant. Today's date: {siandiena}.
+
+{f"Papildomas kontekstas: {santrauka}" if santrauka else ""} 
 
 Always follow this EXACT order, never skip steps:
 1. Call gauk_straipsniu_sarasa to find relevant articles.
@@ -234,30 +239,31 @@ Always follow this EXACT order, never skip steps:
 4. If user asks to add matches to calendar - call ideti_i_kalendoriu AFTER isskirk_rungtynes.
 5. Provide a summary in Lithuanian as a single continuous paragraph without any line breaks, bullet points or numbered lists.
 """,
-    checkpointer=memory, # trumpalaikes atminties implementacija
-    messages_modifier=trim_messages(
-        max_tokens=4,        # saugo 4 paskutinius pranesimus
-        strategy="last",     # saugomi paskutiniai o ne pirmi pranesimai
-        token_counter=len,   # kad tokenai skaiciuojami butu pranesimu kiekiu
-        include_system=True, # atsimenami promptai
-        allow_partial=False, 
-        start_on="human",    # zmogaus uzklausas pirmas rodo
     )
-)
 
-#print(agent.get_graph().draw_mermaid()) # vizualizavimui
+    atsakymas = agent.invoke(
+        {"messages": [{"role": "user", "content": uzklausa}]}
+    )
 
-while True:
-        uzklausa = input("Parašykite užklausą arba exit, kad baigti: ").strip()
-            
-        if uzklausa.lower() == "exit":
-            break
+    tekstas = atsakymas["messages"][-1].content
+    tekstas = " ".join(tekstas.split())
 
-        atsakymas = agent.invoke(
-            {"messages": [{"role": "user", "content": uzklausa}]},
-            config={"configurable": {"thread_id": "1"}}
-        )
+    santrauka = llm_santraukai.invoke(f""" 
+    Extract key facts from this conversation in Lithuanian.
+    Answer in NO MORE than 100 words.
+    
+    User asked: {uzklausa}
+    Agent answered: {tekstas}
+    
+    Previous context: {santrauka}
+    """).content #atmintis agentui kuri veliau paduodame i prompta.
 
-        tekstas = atsakymas["messages"][-1].content
-        tekstas = " ".join(tekstas.split())
-        print(tekstas)
+    return tekstas, santrauka
+
+atsakymas1, santrauka = klausk("Kokios artėjančios Žalgirio rungtynės?", santrauka)
+print(atsakymas1)
+print(f"Santrauka: {santrauka}")
+
+atsakymas2, santrauka = klausk("Įdėk jas į kalendorių", santrauka)
+print(atsakymas2)
+print(f"Santrauka: {santrauka}")
